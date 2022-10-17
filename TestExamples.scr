@@ -1,0 +1,58 @@
+#include "HelperFunctions.scr";
+
+// TEST CASE:
+function test_diagnostic_sessions_transitions()
+{
+    start_tc("ID_01", "test_diagnostic_sessions_transitions");
+        check_diag_response("10 01","Positive Response");
+        check_diag_response("10 02","Negative Response");
+        check_diag_response("10 01","Positive Response");
+        check_diag_response("10 03","Positive Response");
+        check_diag_response("10 60","50 60 00 3c 02 58");
+    end_tc("ID_01");
+}
+
+function test_fault_ecu_voltage()
+{
+    start_tc("ID_02", "test_fault_ecu_voltage");
+        // service 14: Check if the service can clear successfully the diagnostic information in the server’s memory.
+        // FF FF FF: Clear all group.
+        // XX YY ZZ: Clear specific DTC (XX YY ZZ is a DTC number of a specific fault).
+        check_diag_response("14 ff ff ff","54");
+        // no dtc appears at the beginning of the test
+        // service 19: get the status of server resident Diagnostic Trouble Code (DTC) information from any server, or group of servers within a vehicle.
+        // The server shall return both emissions-related and non-emissions-related DTC information.
+        // sub-function 02: Retrieve the list of DTCs that match a client defined status mask
+        // 08: DTC status mask -> request all DTCs whose bit 3 (confirmed DTC) is 1
+        // The DTCStatusMask contains eight (8) DTC status bits. This byte is used in the request message to allow a client to request DTC information for the DTCs whose status matches the DTCStatusMask.
+        // A DTCs status matches the DTCStatusMask if any one of the DTCs actual status bits is set to '1' and the corresponding status bit in the DTCStatusMask is also set to '1'
+        // If the client specifies a status mask that contains bits that the server does not support, then the server shall process the DTC information using only the bits that it does support.
+        // 59: positive response service identifier
+        // 7b: dtc status availability mask
+        // The DTCStatusAvailabilityMask byte value is dependent on the way the DTC status bits are supported by the ECU and is formed from the individual bits
+        check_diag_response("19 02 08","59 02 7b");
+        // inject ecu fault
+        set_internal_variable("_paddal_par_a_st._Dal_TestMode_Active_B", "1");
+        set_internal_variable("_paddal_par_a_st._Dal_TestMode_EventId_UW", "149");
+        set_internal_variable("_paddal_par_a_st._Dal_TestMode_EventStatus_B", "1");
+        Sleep(1000);
+        check_diag_response("10 01","Positive Response");
+        // DTC code length: 2 or 3 bytes
+        // check whether dtc appear, 3-byte DTC is 6f 00 17, use SAE J2012DA & ISO 15031-6 to decode
+        // Byte 1 & Byte 2: Root SAE code number -> 6f 00 -> C2F 0 -> Table C2XXX Manufacturer Controlled DTC
+        // Byte 3: FTB -> Failure Type Byte -> 17 -> Circuit Voltage Above Threshold
+        check_diag_response("19 02 08","59 02 7b 6f 00 17 2b");
+        // remove ecu fault
+        set_internal_variable("_paddal_par_a_st._Dal_TestMode_EventStatus_B", "0");
+        set_internal_variable("_paddal_par_a_st._Dal_TestMode_EventId_UW", "0");
+        set_internal_variable("_paddal_par_a_st._Dal_TestMode_Active_B", "0");
+        Sleep(2000);
+        check_diag_response("14 ff ff ff","54");
+        // no dtc appears after removing fault
+        check_diag_response("19 02 08","59 02 7b");
+    end_tc("ID_02");
+}
+
+// run test cases
+test_diagnostic_sessions_transitions();
+test_fault_ecu_voltage();

@@ -1,0 +1,191 @@
+function logger(logfile[], message[])
+{
+    //File handle, a number of data type "long". In case of an error the return value is 1
+    long hFile;
+    hFile = OpenFile(logfile, "a ");
+    //This function writes formatted data to a text file.
+    Fprint(hFile, message);
+    Fprint(hFile, "\n");
+    CloseFile(hFile);
+}
+
+//start test case
+function start_tc(tc_id[], tc_name[])
+{
+    char message[1024];
+    char timestamp[80];
+    //The function returns the current system time (local time) either as time in seconds since January 1, 1970 or as a formatted string.
+    SystemTime(timestamp, "%H:%M:%S");
+    Sprint(message, "[START TESTCASE][%s][%s][%s]", tc_id, tc_name, timestamp);
+    logger("./test_log", message);
+}
+
+//end test case
+function end_tc(tc_id[])
+{
+    char message[1024];
+    char timestamp[80];
+    //The function returns the current system time (local time) either as time in seconds since January 1, 1970 or as a formatted string.
+    SystemTime(timestamp, "%H:%M:%S");
+    Sprint(message, "[END TESTCASE][%s][%s]", tc_id, timestamp);
+    logger("./test_log", message);
+}
+
+//test step description
+//PASSED: status is 1
+//FAILED: status is 0
+function log_teststep(message[], status)
+{
+    char format_message[4096];
+    if (status == 1)
+    {
+        Sprint(format_message, "[TEST STEP][PASSED][%s]", message);
+    }
+    else{
+        Sprint(format_message, "[TEST STEP][FAILED][%s]", message);
+    }
+    logger("./test_log", format_message);
+}
+
+function check_diag_response(request[], expected_response[])
+{
+    unsigned int i = 0;
+    unsigned int count = 0;
+    unsigned int length;
+    length = StrLen(request);
+    char buffer[5000];
+    char hex_str[2];
+    for (i=0; i<=length; i++)
+    {
+       
+       // seems like shortcut-evaluation not available with CASL so I have to use else-if
+       if (i == length)
+       {
+           StrCpy(hex_str, request, 2, i-2);
+             int hex_code;
+             SScan(hex_str, "%x", hex_code);        
+             buffer[count++] = hex_code;
+       }
+       // ASCII value of space is 32
+       else if (request[i] == 32)
+       {
+           StrCpy(hex_str, request, 2, i-2);
+             int hex_code;
+             SScan(hex_str, "%x", hex_code);        
+             buffer[count++] = hex_code;
+       }
+    }
+    //The function returns a message handle, which refers to the generated message.
+    //Valid message handles are always greater than 0; in case of error less than or equal to 0.
+    long request_msg_handle;
+    request_msg_handle = RADAR.DiagNewRawMessageByArray(buffer, count);
+
+    long response_msg_handle;
+    char response_buffer[5000];
+    if (request_msg_handle>0)
+    {
+        response_msg_handle = RADAR.DiagSendRequest(request_msg_handle);
+
+        if (response_msg_handle == 0)
+        {
+            Sprint(response_buffer, "Input: %s | Expected: %s | Actual: No Response", request, expected_response);
+            if (StrCmp(expected_response, "No Response", -1, 0) == 0)
+            {
+                log_teststep(response_buffer, 1);
+            }
+            else
+            {
+                log_teststep(response_buffer, 0);
+            }
+        }
+        else
+        {
+          for(i = 0; i < DiagGetMessageSize(response_msg_handle); i++)
+          {
+                if(i==0){
+                    //avoid space at the beginning of the string
+                    Sprint(response_buffer, "%.2X", DiagGetRaw(response_msg_handle, i));
+                }
+                else{
+                      Sprint(response_buffer, "%s %.2X", response_buffer, DiagGetRaw(response_msg_handle, i));
+                }
+          }
+           
+           
+            //compare all characters, case insensitive
+            if (StrCmp(expected_response, "Positive Response", -1, 0) == 0)
+            {
+                Sprint(response_buffer, "Input: %s | Expected: %s | Actual: %s", request, expected_response, response_buffer);
+                if(DiagIsPositiveResponse(response_msg_handle))
+                {
+                    log_teststep(response_buffer, 1);
+                }
+                else
+                {
+                    log_teststep(response_buffer, 0);
+                }
+            }
+            else if (StrCmp(expected_response, "Negative Response", -1, 0) == 0)
+            {
+                Sprint(response_buffer, "Input: %s | Expected: %s | Actual: %s", request, expected_response, response_buffer);
+                if(DiagIsNegativeResponse(response_msg_handle))
+                {
+                    log_teststep(response_buffer, 1);
+                }
+                else
+                {
+                    log_teststep(response_buffer, 0);
+                }
+            }
+            else if (StrCmp(expected_response, response_buffer, -1, 0) == 0)
+            {
+                Sprint(response_buffer, "Input: %s | Expected: %s | Actual: %s", request, expected_response, response_buffer);
+                log_teststep(response_buffer, 1);
+            }
+            else
+            {
+                Sprint(response_buffer, "Input: %s | Expected: %s | Actual: %s", request, expected_response, response_buffer);
+                log_teststep(response_buffer, 0);
+            }
+        }
+    }
+    else
+    {
+        log_teststep("Invalid request message handle", 0);
+    }
+
+    //The resources linked to the message handle must be released explicitly; otherwise memory leaks can occur.
+    //When a message is no longer needed (e.g. a request message after Device.DiagSendRequest()), this should be release with DiagDeleteMessage() immediately.
+    DiagDeleteMessage(request_msg_handle);
+    DiagDeleteMessage(response_msg_handle);
+    //clear string buffer to remove old data of previous function call
+    char empty[5000];
+    StrCpy(response_buffer, empty);
+    StrCpy(buffer, empty);
+    count = 0;
+    //This function delays the execution of a script for a specified time. The time is given in milliseconds
+    //When Sleep () used in a function, the function will be canceled after the Sleep command and not continue to run.
+    Sleep(10);
+}
+
+function set_internal_variable(tVar[], tVal[])
+{
+    char buffer[512];
+    double result;
+    long errorcode;
+    char errorText[256];
+    int value;
+    //This function reads data fields from a formatted input string. %d – integer value
+    SScan(tVal, "%d", value);
+    result = current_device.SetParameterRawValue(tVar,value,0,0);
+    if (result<0){
+        errorcode = GetLastError();
+        GetLastErrorText(errorText);
+        Sprint(buffer, "SetParameterRawValue Error: (%d)%s", errorcode, errorText);
+        log_teststep(buffer, 0);
+    }
+    else{
+        Sprint(buffer, "Set variable %s to %d", tVar, value);
+        log_teststep(buffer, 1);
+    }
+}
